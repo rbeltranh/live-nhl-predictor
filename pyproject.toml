@@ -7,7 +7,13 @@ authors = [
     { name = "Rafael Beltran", email = "rafaelbeltran@habi.co" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "fastparquet>=2026.9.0",
+    "nhl-api-py>=3.3.0",
+    "pandas>=3.0.6",
+    "pyarrow>=26.0.0",
+    "scikit-learn>=1.9.1",
+]
 
 [project.scripts]
 live-nhl-predictor = "live_nhl_predictor:main"
@@ -15,3 +21,8 @@ live-nhl-predictor = "live_nhl_predictor:main"
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.4.0",
+]
