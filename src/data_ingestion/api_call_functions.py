@@ -1,7 +1,8 @@
 import json 
 from nhlpy import NHLClient
-import argparse
 
+from pathlib import Path
+from functools import partial
 from itertools import chain
 import pandas as pd
 
@@ -9,11 +10,7 @@ import pandas as pd
 
 DEFAULT_VERBOSE = False
 
-parser = argparse.ArgumentParser()
-parser.add_argument("-v", "--verbose", action="store_true", default=DEFAULT_VERBOSE)
-args = parser.parse_args()
-
-verbose = args.verbose
+USED_PBP_FIELDS = ['id', 'season', 'gameType', 'gameDate', 'venue', 'startTimeUTC', 'awayTeam', 'homeTeam', 'plays', 'rosterSpots', 'regPeriods']
 # Part 1. Map Teams to IDs
 
 client = NHLClient()
@@ -36,7 +33,7 @@ all_seasons = [str(season_starter) + str(season_starter+1)  for season_starter i
 
 team_abbrs = list(team_map.keys())
 
-def get_season_data(season:str, v:bool = verbose):
+def get_season_data(season:str, v:bool = DEFAULT_VERBOSE):
     for team in team_abbrs:
         team_raw_schedule = client.schedule.team_season_schedule(team, season)
         if v:
@@ -52,23 +49,48 @@ def get_season_data(season:str, v:bool = verbose):
         } for game in games if game["gameType"] == 2 and game["homeTeam"]["abbrev"] == team]
         
         yield from games_data
+            
         
-        
-        
-def save_seasons_data(v:bool = verbose):
+def save_seasons_data(v:bool = DEFAULT_VERBOSE):
+    
+    games_destination = "data_downloads/games.parquet"
+    games_path = Path(games_destination)
+    
+    if games_path.exists():
+        if v:
+            print(f"File already exists, skipping")
+        return None
 
-    all_games = map(get_season_data, all_seasons)
+    all_games = map(partial(get_season_data, v=v), all_seasons)
 
     games_df = pd.DataFrame(chain.from_iterable(all_games))
 
-    if verbose:
+    if v:
         print(games_df.shape)
         print(games_df.head())
-        print(games_df["game_id"].is_unique)
+        print(f"Are games unique?: {games_df["game_id"].is_unique}")
         print(games_df.groupby("season")["game_id"].nunique())
 
     # Save so you don't have to hit the API again (needs pyarrow)
     games_df.to_parquet("data_downloads/games.parquet", index=False)
     
+    
+def save_json_from_game(game_id, v: bool = DEFAULT_VERBOSE):
+    file_path = Path(f"data_downloads/pbp_jsons/{game_id}.json")
+    if file_path.exists():
+        if v:
+            print(f"File {file_path} already exists, skipping")
+        return None
 
-save_seasons_data()
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    pbp = client.game_center.play_by_play(game_id=game_id)
+    pbp = {k: val for k, val in pbp.items() if k in USED_PBP_FIELDS}
+
+    if v:
+        away = pbp["awayTeam"]["abbrev"]
+        home = pbp["homeTeam"]["abbrev"]
+        print(f"Saving game {game_id}: {away}@{home} {pbp['gameDate']} in {file_path}")
+
+    with open(file_path, "w") as f:
+        json.dump(pbp, f)
