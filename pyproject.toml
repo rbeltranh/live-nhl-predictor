@@ -17,16 +17,10 @@ dependencies = [
 
 [project.scripts]
 live-nhl-predictor = "live_nhl_predictor:main"
-nhl-ingest = "data_ingestion.download_data:main"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
 build-backend = "uv_build"
-
-[tool.uv.build-backend]
-module-name = ["live_nhl_predictor", "data_ingestion"]
-source-exclude = ["**/data_downloads/**"]
-wheel-exclude = ["**/data_downloads/**"]
 
 [dependency-groups]
 dev = [
