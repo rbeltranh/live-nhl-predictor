@@ -220,4 +220,4 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Too much files
-src/data_ingestion/data_downloads/pbp_jsons
+data
