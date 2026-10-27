@@ -1,8 +1,8 @@
 import argparse
 import pandas as pd
 import logging
-from api_call_functions import *
-
+from data_ingestion.tasks.api_call_functions import *
+from data_ingestion.tasks.config import DEFAULT_VERBOSE
 
 
 console_handler = logging.StreamHandler()
@@ -26,7 +26,7 @@ save_seasons_data(verbose)
 
 # Loads the parquet file and starts downloading the jsons for the games
 
-all_games = pd.read_parquet("data_downloads/games.parquet")["game_id"]
+all_games = pd.read_parquet("DEFAULT_GAMES_FILE_PATH")["game_id"]
 if verbose:
     logger.info("Saving the play-by-play jsons...")
     logger.info(f"Total games to download: {len(all_games)}")

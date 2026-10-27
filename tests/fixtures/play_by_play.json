@@ -1,0 +1,14 @@
+{
+  "id": 2023020001,
+  "season": 20232024,
+  "gameType": 2,
+  "gameDate": "2023-10-10",
+  "venue": {"default": "PPG Paints Arena"},
+  "startTimeUTC": "2023-10-11T00:00:00Z",
+  "awayTeam": {"abbrev": "CHI", "score": 1},
+  "homeTeam": {"abbrev": "PIT", "score": 2},
+  "plays": [{"eventId": 1, "typeDescKey": "game-start"}],
+  "rosterSpots": [],
+  "regPeriods": 3,
+  "metadata": {"fixtureOnly": true}
+}

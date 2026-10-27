@@ -5,10 +5,9 @@ from functools import partial
 from itertools import chain
 import pandas as pd
 import logging
+from config import DEFAULT_GAMES_FILE_PATH, DEFAULT_VERBOSE, DEFAULT_PLAY_BY_PLAY_PATH
 
 # setup
-
-DEFAULT_VERBOSE = False
 
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
@@ -58,7 +57,7 @@ def get_season_data(season:str, v:bool = DEFAULT_VERBOSE):
         
 def save_seasons_data(v:bool = DEFAULT_VERBOSE):
     
-    games_destination = "data_downloads/games.parquet"
+    games_destination = DEFAULT_GAMES_FILE_PATH
     games_path = Path(games_destination)
     
     if games_path.exists():
@@ -77,11 +76,11 @@ def save_seasons_data(v:bool = DEFAULT_VERBOSE):
         logger.info(games_df.groupby("season")["game_id"].nunique())
 
     # Save so you don't have to hit the API again (needs pyarrow)
-    games_df.to_parquet("data_downloads/games.parquet", index=False)
+    games_df.to_parquet(DEFAULT_GAMES_FILE_PATH, index=False)
     
     
 def save_json_from_game(game_id, v: bool = DEFAULT_VERBOSE):
-    file_path = Path(f"data_downloads/pbp_jsons/{game_id}.json")
+    file_path = Path(f"{DEFAULT_PLAY_BY_PLAY_PATH}{game_id}.json")
     if file_path.exists():
         if v:
             logger.info(f"File {file_path} already exists, skipping")
