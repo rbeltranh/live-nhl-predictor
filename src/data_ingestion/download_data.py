@@ -1,30 +1,55 @@
+"""Command-line entry point for the historical NHL data backfill."""
+
 import argparse
+import logging
+from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
-from api_call_functions import *
+from data_ingestion.api_call_functions import (
+    BACKFILL_SEASONS,
+    create_client,
+    save_json_from_game,
+    save_seasons_data,
+)
 
-parser = argparse.ArgumentParser()
-parser.add_argument("-v", "--verbose", action="store_true", default=DEFAULT_VERBOSE)
-args = parser.parse_args()
-
-verbose = args.verbose
+LOGGER = logging.getLogger(__name__)
 
 
-# Saves season games data
-print(f"Downloading data with verbose: {verbose}")
+def download_data(
+    client: Any,
+    seasons: tuple[str, ...],
+    output_dir: str | Path,
+) -> None:
+    """Download season summaries and each game's full play-by-play response."""
+    output_dir = Path(output_dir)
+    games_path = output_dir / "games.parquet"
+    save_seasons_data(seasons, games_path, client)
 
-if verbose:
-    print("Downloading Seasons Data...")
-save_seasons_data(verbose)
+    games = pd.read_parquet(games_path)["game_id"]
+    LOGGER.info("Downloading play-by-play for %d games", len(games))
+    for game_id in games:
+        save_json_from_game(
+            game_id,
+            output_dir / "pbp_jsons" / f"{game_id}.json",
+            client,
+        )
 
-# Loads the parquet file and starts downloading the jsons for the games
 
-all_games = pd.read_parquet("data_downloads/games.parquet")["game_id"]
-if verbose:
-    print("Saving the play-by-play jsons...")
-    print(f"Total games to download: {len(all_games)}")
-    
-for game_id in all_games:
-    save_json_from_game(game_id, v=verbose)
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-dir", type=Path, default=Path("data_downloads"))
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
 
+    logging.basicConfig(
+        level=logging.INFO if args.verbose else logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    LOGGER.info("Starting historical backfill for seasons %s", BACKFILL_SEASONS)
+    download_data(create_client(), BACKFILL_SEASONS, args.output_dir)
+
+
+if __name__ == "__main__":
+    main()

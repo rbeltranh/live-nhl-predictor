@@ -1,96 +1,107 @@
-import json 
-from nhlpy import NHLClient
+"""NHL API ingestion functions.
 
+Nothing is fetched at import time. Callers provide the client and destinations,
+which keeps these functions usable from scripts, tests, and Airflow tasks.
+"""
+
+import json
+import logging
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
-from functools import partial
-from itertools import chain
+from typing import Any
+
 import pandas as pd
 
-# setup
+LOGGER = logging.getLogger(__name__)
+BACKFILL_SEASON_STARTS = range(2021, 2026)
+BACKFILL_SEASONS = tuple(f"{year}{year + 1}" for year in BACKFILL_SEASON_STARTS)
 
-DEFAULT_VERBOSE = False
 
-USED_PBP_FIELDS = ['id', 'season', 'gameType', 'gameDate', 'venue', 'startTimeUTC', 'awayTeam', 'homeTeam', 'plays', 'rosterSpots', 'regPeriods']
-# Part 1. Map Teams to IDs
+def create_client() -> Any:
+    """Create the NHL API client lazily, without network access on import."""
+    from nhlpy import NHLClient
 
-client = NHLClient()
+    return NHLClient()
 
-teams = client.teams.teams() # maps team abbr, name, conference, franchise_id
 
-team_map = {}
+def get_team_map(client: Any) -> dict[str, str]:
+    """Return team abbreviation to name mapping from the supplied client."""
+    return {team["abbr"]: team["name"] for team in client.teams.teams()}
 
-for team in teams:
-    team_map[team["abbr"]] = team["name"]
-    
 
-# Part 2: Fetch all game ids for the last 4 seasons
+def get_season_data(
+    season: str,
+    client: Any,
+    team_abbrs: Iterable[str] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Yield regular-season game summaries for a season.
 
-season_starters = range(2021,2026)
+    The schedule API returns each team's games; selecting games where that team
+    is the home team ensures each game is emitted once.
+    """
+    if team_abbrs is None:
+        team_abbrs = get_team_map(client)
 
-all_seasons = [str(season_starter) + str(season_starter+1)  for season_starter in season_starters]
-
-# get a map for game_id, season, home_team_name, away_team_score, home_team_score
-
-team_abbrs = list(team_map.keys())
-
-def get_season_data(season:str, v:bool = DEFAULT_VERBOSE):
     for team in team_abbrs:
-        team_raw_schedule = client.schedule.team_season_schedule(team, season)
-        if v:
-            print(f"INFO: Downloading games for team {team} in the {season} season")
-        games = team_raw_schedule["games"]
-        games_data = [{
-            "game_id" : game["id"],
-            "season" : season,
-            "away_team_score": game["awayTeam"].get("score"),
-            "home_team_score": game["homeTeam"].get("score"),
-            "home_team_name" : game["homeTeam"].get("abbrev"),
-            "away_team_name" : game["awayTeam"].get("abbrev")
-        } for game in games if game["gameType"] == 2 and game["homeTeam"]["abbrev"] == team]
-        
-        yield from games_data
-            
-        
-def save_seasons_data(v:bool = DEFAULT_VERBOSE):
-    
-    games_destination = "data_downloads/games.parquet"
-    games_path = Path(games_destination)
-    
-    if games_path.exists():
-        if v:
-            print(f"File already exists, skipping")
-        return None
+        LOGGER.info("Downloading games for team %s in season %s", team, season)
+        schedule = client.schedule.team_season_schedule(team, season)
+        for game in schedule["games"]:
+            if game["gameType"] != 2 or game["homeTeam"]["abbrev"] != team:
+                continue
+            yield {
+                "game_id": game["id"],
+                "season": season,
+                "away_team_score": game["awayTeam"].get("score"),
+                "home_team_score": game["homeTeam"].get("score"),
+                "home_team_name": game["homeTeam"].get("abbrev"),
+                "away_team_name": game["awayTeam"].get("abbrev"),
+            }
 
-    all_games = map(partial(get_season_data, v=v), all_seasons)
 
-    games_df = pd.DataFrame(chain.from_iterable(all_games))
+def save_seasons_data(
+    seasons: Sequence[str],
+    output_path: str | Path,
+    client: Any,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Fetch season summaries and save them as a parquet file."""
+    destination = Path(output_path)
+    if destination.exists() and not overwrite:
+        LOGGER.info("File already exists, skipping: %s", destination)
+        return destination
 
-    if v:
-        print(games_df.shape)
-        print(games_df.head())
-        print(f"Are games unique?: {games_df["game_id"].is_unique}")
-        print(games_df.groupby("season")["game_id"].nunique())
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    rows = (
+        row
+        for season in seasons
+        for row in get_season_data(season, client)
+    )
+    games_df = pd.DataFrame(rows)
+    LOGGER.info("Fetched %d games; unique IDs: %s", len(games_df), games_df["game_id"].is_unique if not games_df.empty else True)
+    games_df.to_parquet(destination, index=False)
+    return destination
 
-    # Save so you don't have to hit the API again (needs pyarrow)
-    games_df.to_parquet("data_downloads/games.parquet", index=False)
-    
-    
-def save_json_from_game(game_id, v: bool = DEFAULT_VERBOSE):
-    file_path = Path(f"data_downloads/pbp_jsons/{game_id}.json")
-    if file_path.exists():
-        if v:
-            print(f"File {file_path} already exists, skipping")
-        return None
 
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+def save_json_from_game(
+    game_id: int | str,
+    output_path: str | Path,
+    client: Any,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Save the full play-by-play API response for a game as JSON."""
+    destination = Path(output_path)
+    if destination.exists() and not overwrite:
+        LOGGER.info("File already exists, skipping: %s", destination)
+        return destination
 
-    pbp = client.game_center.play_by_play(game_id=game_id)
-    pbp = {k: val for k, val in pbp.items() if k in USED_PBP_FIELDS}
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    play_by_play = client.game_center.play_by_play(game_id=game_id)
+    with destination.open("w", encoding="utf-8") as output_file:
+        json.dump(play_by_play, output_file)
 
-    if v:
-        away = pbp["awayTeam"]["abbrev"]
-        home = pbp["homeTeam"]["abbrev"]
-        print(f"Saving game {game_id}: {away}@{home} {pbp['gameDate']} in {file_path}")
-
-    with open(file_path, "w") as f:
-        json.dump(pbp, f)
+    away = play_by_play.get("awayTeam", {}).get("abbrev", "?")
+    home = play_by_play.get("homeTeam", {}).get("abbrev", "?")
+    LOGGER.info("Saved game %s (%s@%s) to %s", game_id, away, home, destination)
+    return destination
